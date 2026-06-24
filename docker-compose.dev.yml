@@ -1,0 +1,81 @@
+services:
+
+  # ── Ollama — local LLM runtime ──────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_models:/root/.ollama
+    expose:
+      - "11434"
+    networks:
+      - hooklens_net
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  # ── Ollama init — pulls model once, then exits ──────────────────────────
+  ollama-init:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    networks:
+      - hooklens_net
+    entrypoint: ["/bin/sh", "-c", "ollama pull ${OLLAMA_MODEL:-llama3.2:3b}"]
+    restart: "no"
+
+  # ── Backend — FastAPI + faster-whisper (Hot Reload) ────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2:3b}
+      - WHISPER_MODEL=${WHISPER_MODEL:-base}
+      - ALLOWED_ORIGINS=http://localhost,http://localhost:5173
+      - HF_HOME=/cache/huggingface
+    volumes:
+      - ./backend:/app  # Mount source code for hot reload
+      - whisper_cache:/cache
+      - backend_outputs:/app/outputs
+    expose:
+      - "8000"
+    ports:
+      - "8000:8000" # Expose backend directly for dev if needed
+    networks:
+      - hooklens_net
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  # ── Frontend — Vite Dev Server (Hot Reload) ─────────────────────────────
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules # Prevent host node_modules from overwriting container node_modules
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    networks:
+      - hooklens_net
+    command: ["sh", "-c", "npm install && npm run dev -- --host 0.0.0.0"]
+
+networks:
+  hooklens_net:
+    driver: bridge
+
+volumes:
+  ollama_models:
+  whisper_cache:
+  backend_outputs:
