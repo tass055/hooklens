@@ -7,6 +7,7 @@ export interface TranscriptWord {
 
 export interface TranscriptData {
   full_text: string
+  original_text?: string
   words: TranscriptWord[]
   duration_ms: number
 }

@@ -135,6 +135,7 @@ async def _process_video(job_id: str, video_path: str) -> None:
         _set(job_id, "transcribing", 15, "Transcribing audio…")
         _log_detail(job_id, "Running Whisper model on CPU. Splitting audio segments...")
         transcript = await transcribe_video(video_path)
+        transcript["original_text"] = transcript["full_text"]
         _log_detail(job_id, f"Transcription completed. Extracted {len(transcript['words'])} words.")
 
         # SOC2: delete video immediately after transcription
