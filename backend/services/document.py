@@ -250,11 +250,13 @@ def _build_doc(
             run.font.size = Pt(11)
 
     # -------------------------------------------------------------------------
-    # 8. Full Transcript (with hook highlighted)
+    # 8. Full Transcript Details
     # -------------------------------------------------------------------------
     doc.add_page_break()
-    _add_heading(doc, "Full Transcript", level=1)
+    _add_heading(doc, "Transcript Details", level=1)
 
+    # 8.1 Corrected Transcript
+    _add_heading(doc, "Corrected Transcript", level=2)
     full_text = transcript_data.get("full_text", "")
     start = hook_identification.get("hook_start_char", 0)
     end = hook_identification.get("hook_end_char", 0)
@@ -267,6 +269,16 @@ def _build_doc(
     legend_para.add_run("   ")
 
     _add_transcript_with_highlight(doc, full_text, start, end)
+
+    # 8.2 Original Verbatim Transcript
+    original_text = transcript_data.get("original_text")
+    if original_text:
+        doc.add_paragraph()
+        _add_heading(doc, "Original Verbatim Transcript", level=2)
+        orig_para = doc.add_paragraph()
+        orig_para.style = doc.styles["Normal"]
+        run = orig_para.add_run(original_text)
+        run.font.size = Pt(10)
 
     doc.save(output_path)
 

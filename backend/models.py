@@ -23,6 +23,7 @@ class TranscriptWord(BaseModel):
 
 class TranscriptData(BaseModel):
     full_text: str
+    original_text: Optional[str] = None
     words: list[TranscriptWord]
     duration_ms: int
 
