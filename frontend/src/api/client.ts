@@ -31,7 +31,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>
 }
 
-export function uploadVideo(file: File, onProgress?: (percent: number) => void): Promise<{ job_id: string }> {
+export function uploadVideo(file: File, language: string | null, onProgress?: (percent: number) => void): Promise<{ job_id: string }> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     
@@ -80,6 +80,9 @@ export function uploadVideo(file: File, onProgress?: (percent: number) => void):
     xhr.open('POST', `${BASE}/api/upload`)
     const form = new FormData()
     form.append('file', file)
+    if (language) {
+      form.append('language', language)
+    }
     xhr.send(form)
   })
 }

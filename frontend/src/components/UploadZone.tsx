@@ -9,7 +9,7 @@ const ACCEPTED_MIME = new Set([
 const MAX_MB = 500
 
 interface Props {
-  onFileSelected: (file: File) => void
+  onFileSelected: (file: File, language: string | null) => void
   disabled?: boolean
 }
 
@@ -36,14 +36,15 @@ function validate(file: File): AppError | null {
 export default function UploadZone({ onFileSelected, disabled }: Props) {
   const [isDragging, setIsDragging] = useState(false)
   const [error, setError] = useState<AppError | null>(null)
+  const [language, setLanguage] = useState<string>('')
   const inputRef = useRef<HTMLInputElement>(null)
 
   const handle = useCallback((file: File) => {
     const err = validate(file)
     if (err) { setError(err); return }
     setError(null)
-    onFileSelected(file)
-  }, [onFileSelected])
+    onFileSelected(file, language || null)
+  }, [onFileSelected, language])
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -112,7 +113,32 @@ export default function UploadZone({ onFileSelected, disabled }: Props) {
         </div>
       )}
 
-      <p className="mt-6 text-xs text-gray-600">
+      <div className="mt-8 flex flex-col items-center gap-2">
+        <label htmlFor="language-select" className="text-sm font-medium text-gray-300">
+          Video Language (Optional)
+        </label>
+        <select
+          id="language-select"
+          value={language}
+          onChange={(e) => setLanguage(e.target.value)}
+          disabled={disabled}
+          className="bg-gray-900 border border-gray-700 text-gray-300 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-64 p-2.5 transition-colors"
+        >
+          <option value="">Auto-detect (Recommended)</option>
+          <option value="en">English</option>
+          <option value="ur">Urdu (اردو)</option>
+          <option value="hi">Hindi (हिंदी)</option>
+          <option value="ar">Arabic (العربية)</option>
+          <option value="es">Spanish (Español)</option>
+          <option value="fr">French (Français)</option>
+          <option value="de">German (Deutsch)</option>
+        </select>
+        <p className="text-xs text-gray-500 max-w-xs text-center mt-1">
+          Select a language to force the transcription script and prevent hallucinations in mixed-language videos.
+        </p>
+      </div>
+
+      <p className="mt-8 text-xs text-gray-600">
         All processing happens locally — no data leaves your machine.
       </p>
     </div>
