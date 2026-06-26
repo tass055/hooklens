@@ -53,12 +53,12 @@ export default function App() {
   }
   useEffect(() => stopPolling, [])
 
-  const handleFileSelected = async (file: File) => {
+  const handleFileSelected = async (file: File, language: string | null) => {
     setError(null)
     setAppState('uploading')
     setUploadProgress(0)
     try {
-      const { job_id } = await uploadVideo(file, (percent) => setUploadProgress(percent))
+      const { job_id } = await uploadVideo(file, language, (percent) => setUploadProgress(percent))
       setJobId(job_id)
       setAppState('processing')
       startPolling(job_id)

@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException, Request
+from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -78,6 +78,7 @@ async def upload_video(
     request: Request,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    language: str | None = Form(None),
 ):
     # OWASP: MIME type allowlist
     if file.content_type not in ALLOWED_MIME_TYPES:
@@ -121,7 +122,7 @@ async def upload_video(
     }
 
     audit.info("UPLOAD job=%s", job_id)
-    background_tasks.add_task(_process_video, job_id, str(video_path))
+    background_tasks.add_task(_process_video, job_id, str(video_path), language)
     return UploadResponse(job_id=job_id)
 
 
@@ -129,12 +130,12 @@ async def upload_video(
 # Background job
 # ---------------------------------------------------------------------------
 
-async def _process_video(job_id: str, video_path: str) -> None:
+async def _process_video(job_id: str, video_path: str, language: str | None = None) -> None:
     try:
         # --- Step 1: Transcribe ---
         _set(job_id, "transcribing", 15, "Transcribing audio…")
-        _log_detail(job_id, "Running Whisper model on CPU. Splitting audio segments...")
-        transcript = await transcribe_video(video_path)
+        _log_detail(job_id, f"Running Whisper model on CPU. Splitting audio segments... (Language: {language or 'Auto'})")
+        transcript = await transcribe_video(video_path, language)
         transcript["original_text"] = transcript["full_text"]
         _log_detail(job_id, f"Transcription completed. Extracted {len(transcript['words'])} words.")
 

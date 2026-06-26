@@ -35,10 +35,17 @@ def _get_model() -> WhisperModel:
     return _model
 
 
-def _transcribe_sync(video_path: str) -> dict[str, Any]:
+def _transcribe_sync(video_path: str, language: str | None = None) -> dict[str, Any]:
     model = _get_model()
     try:
-        segments, info = model.transcribe(video_path, word_timestamps=True)
+        segments, info = model.transcribe(
+            video_path,
+            language=language,
+            word_timestamps=True,
+            vad_filter=True,
+            condition_on_previous_text=False,
+            initial_prompt="This is a conversation mixing multiple languages like English, Urdu, and Arabic. Hello, کیا حال ہے؟"
+        )
     except Exception as exc:
         raise TranscriptionError(
             "Transcription failed. Please ensure the file is not corrupted and contains clear audio."
@@ -74,6 +81,6 @@ def _transcribe_sync(video_path: str) -> dict[str, Any]:
     }
 
 
-async def transcribe_video(video_path: str) -> dict[str, Any]:
+async def transcribe_video(video_path: str, language: str | None = None) -> dict[str, Any]:
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _transcribe_sync, video_path)
+    return await loop.run_in_executor(None, _transcribe_sync, video_path, language)
