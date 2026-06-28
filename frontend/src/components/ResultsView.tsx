@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import HookScoreCard from './HookScoreCard'
 import TranscriptView from './TranscriptView'
-import { getDownloadUrl } from '../api/client'
+import DebugView from './DebugView'
+import { getDownloadUrl, getSrtDownloadUrl } from '../api/client'
 import type { JobResult } from '../types'
 
 interface Props {
@@ -9,28 +11,52 @@ interface Props {
 }
 
 export default function ResultsView({ result, jobId }: Props) {
-  const { transcript, hook_identification: hookId, hook_scores: scores } = result
+  const [isDebugMode, setIsDebugMode] = useState(false)
+  const { transcript, hook_identification: hookId, hook_scores: scores, llm_logs: logs } = result
 
   return (
     <div className="space-y-6">
       {/* Header row */}
       <div className="flex items-start justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-gray-100">Analysis Complete</h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-2xl font-bold text-gray-100">Analysis Complete</h2>
+            <button
+              onClick={() => setIsDebugMode(!isDebugMode)}
+              className={`p-1.5 rounded-md transition-colors ${isDebugMode ? 'bg-amber-500/20 text-amber-500' : 'bg-gray-800 text-gray-400 hover:text-gray-300'}`}
+              title="Toggle Debug Mode"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v1m0 14v1m-7.071-7.071l-.707.707m15.556-15.556l-.707.707M4 12H3m18 0h-1m-7-7h.01M12 12h.01M16 12h.01M12 16h.01M8 12h.01" />
+              </svg>
+            </button>
+          </div>
           <p className="text-gray-500 text-sm mt-1">
             Hook identified · Full transcript available below
           </p>
         </div>
-        <a
-          href={getDownloadUrl(jobId)}
-          download
-          className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-sm font-medium transition-colors shrink-0"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-          </svg>
-          Download Report (.docx)
-        </a>
+        <div className="flex gap-3">
+          <a
+            href={getSrtDownloadUrl(jobId)}
+            download
+            className="flex items-center gap-2 px-5 py-2.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm font-medium transition-colors shrink-0 border border-gray-700"
+          >
+            <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+            Subtitles (.srt)
+          </a>
+          <a
+            href={getDownloadUrl(jobId)}
+            download
+            className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-sm font-medium transition-colors shrink-0"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Report (.docx)
+          </a>
+        </div>
       </div>
 
       {/* Scores */}
@@ -127,8 +153,12 @@ export default function ResultsView({ result, jobId }: Props) {
         </div>
       )}
 
-      {/* Full transcript */}
-      <TranscriptView transcript={transcript} hookId={hookId} />
+      {/* Full transcript or Debug Mode */}
+      {isDebugMode ? (
+        <DebugView logs={logs || []} />
+      ) : (
+        <TranscriptView transcript={transcript} hookId={hookId} />
+      )}
     </div>
   )
 }

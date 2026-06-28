@@ -54,7 +54,14 @@ class HookScores(BaseModel):
     key_teachings: list[str]
 
 
+class LlmDebugLog(BaseModel):
+    step: str
+    prompt: str
+    raw_response: str
+
+
 class ResultResponse(BaseModel):
     transcript: TranscriptData
     hook_identification: HookIdentification
     hook_scores: HookScores
+    llm_logs: list[LlmDebugLog] = []

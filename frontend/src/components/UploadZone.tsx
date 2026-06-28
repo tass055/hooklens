@@ -6,7 +6,7 @@ const ACCEPTED_MIME = new Set([
   'video/x-matroska', 'video/mpeg', 'video/x-ms-wmv',
   'audio/mpeg', 'audio/wav', 'audio/mp4', 'audio/webm', 'audio/ogg',
 ])
-const MAX_MB = 500
+const MAX_MB = 5000
 
 interface Props {
   onFileSelected: (file: File, language: string | null) => void
@@ -103,7 +103,7 @@ export default function UploadZone({ onFileSelected, disabled }: Props) {
         </div>
 
         <p className="text-gray-300 font-medium mb-1">Drop your file here, or click to browse</p>
-        <p className="text-gray-500 text-sm">MP4, MOV, AVI, WebM, MKV, MP3, WAV · max 500MB</p>
+        <p className="text-gray-500 text-sm">MP4, MOV, AVI, WebM, MKV, MP3, WAV · max 5GB</p>
       </div>
 
       {error && (

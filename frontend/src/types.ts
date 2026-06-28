@@ -3,6 +3,7 @@ export interface TranscriptWord {
   start_ms: number
   end_ms: number
   confidence: number
+  speaker?: string
 }
 
 export interface TranscriptData {
@@ -38,10 +39,17 @@ export interface HookScores {
   key_teachings?: string[]
 }
 
+export interface LlmDebugLog {
+  step: string
+  prompt: string
+  raw_response: string
+}
+
 export interface JobResult {
   transcript: TranscriptData
   hook_identification: HookIdentification
   hook_scores: HookScores
+  llm_logs?: LlmDebugLog[]
 }
 
 export interface JobStatus {

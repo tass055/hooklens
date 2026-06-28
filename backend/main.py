@@ -6,7 +6,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -26,7 +26,7 @@ logging.basicConfig(
 )
 
 ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")]
-MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024  # 500 MB
+MAX_FILE_SIZE_BYTES = 5000 * 1024 * 1024  # 5000 MB
 
 # OWASP: validate MIME type, not just file extension
 ALLOWED_MIME_TYPES = {
@@ -100,7 +100,7 @@ async def upload_video(
             status_code=413,
             detail={
                 "code": "file_too_large",
-                "message": f"Your file is approximately {size_mb}MB. The limit is 500MB.",
+                "message": f"Your file is approximately {size_mb}MB. The limit is 5000MB.",
                 "action": "Please compress or trim the video before uploading.",
             },
         )
@@ -119,6 +119,7 @@ async def upload_video(
         "message": "Video received, starting transcription…",
         "display_name": safe_display_name,
         "details": ["Job initialized and queued for processing."],
+        "llm_logs": [],
     }
 
     audit.info("UPLOAD job=%s", job_id)
@@ -133,9 +134,16 @@ async def upload_video(
 async def _process_video(job_id: str, video_path: str, language: str | None = None) -> None:
     try:
         # --- Step 1: Transcribe ---
-        _set(job_id, "transcribing", 15, "Transcribing audio…")
+        _set(job_id, "transcribing", 5, "Transcribing audio…")
         _log_detail(job_id, f"Running Whisper model on CPU. Splitting audio segments... (Language: {language or 'Auto'})")
-        transcript = await transcribe_video(video_path, language)
+        
+        def on_transcribe_progress(text: str, current_sec: float, total_sec: float):
+            perc = 5 + int((current_sec / total_sec) * 10) if total_sec > 0 else 5
+            perc = min(15, max(5, perc))
+            _set(job_id, "transcribing", perc, "Transcribing audio…")
+            _log_detail(job_id, f"[Transcription] {text[:100]}{'...' if len(text) > 100 else ''}")
+
+        transcript = await transcribe_video(video_path, language, on_progress=on_transcribe_progress)
         transcript["original_text"] = transcript["full_text"]
         _log_detail(job_id, f"Transcription completed. Extracted {len(transcript['words'])} words.")
 
@@ -159,20 +167,29 @@ async def _process_video(job_id: str, video_path: str, language: str | None = No
                     buf = ""
             return cb
 
-        corrected_text = await correct_transcript(transcript["full_text"], on_chunk=make_chunk_cb("correction"))
+        def make_debug_cb(step_name: str):
+            def cb(prompt: str, raw_response: str):
+                jobs[job_id]["llm_logs"].append({
+                    "step": step_name,
+                    "prompt": prompt,
+                    "raw_response": raw_response
+                })
+            return cb
+
+        corrected_text = await correct_transcript(transcript["full_text"], on_chunk=make_chunk_cb("correction"), on_debug=make_debug_cb("Transcript Correction"))
         transcript["full_text"] = corrected_text
         _log_detail(job_id, "Transcript corrected. Ready for hook analysis.")
 
         # --- Step 2: Identify hook ---
         _set(job_id, "identifying_hook", 45, "Scanning transcript to identify hook segment…")
         _log_detail(job_id, "Evaluating transcript structure with Ollama to detect the core hook...")
-        hook_id = await identify_hook(transcript, on_chunk=make_chunk_cb("identify"))
+        hook_id = await identify_hook(transcript, on_chunk=make_chunk_cb("identify"), on_debug=make_debug_cb("Identify Hook"))
         _log_detail(job_id, f"Hook detected! Type: '{hook_id.get('hook_type', 'Unknown')}'. Rationale: {hook_id.get('rationale', '')}")
 
         # --- Step 3: Score hook ---
         _set(job_id, "scoring_hook", 65, "Scoring hook on value proposition and emotional pull…")
         _log_detail(job_id, "Scoring hook dimensions (emotional pull, strengths, alternative hooks)...")
-        hook_scores = await score_hook(transcript, hook_id, on_chunk=make_chunk_cb("scorer"))
+        hook_scores = await score_hook(transcript, hook_id, on_chunk=make_chunk_cb("scorer"), on_debug=make_debug_cb("Score Hook"))
         _log_detail(job_id, f"Hook scored successfully. Found {len(hook_scores.get('alternative_hooks', []))} alternative hooks.")
 
         # --- Step 4: Generate document ---
@@ -249,6 +266,37 @@ def _safe_delete(path: str, job_id: str) -> None:
 # Status / Result / Download
 # ---------------------------------------------------------------------------
 
+def _format_srt_time(ms: int) -> str:
+    s, ms = divmod(ms, 1000)
+    m, s = divmod(s, 60)
+    h, m = divmod(m, 60)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+def _generate_srt(words: list[dict]) -> str:
+    lines = []
+    chunk = []
+    chunk_idx = 1
+    
+    for i, word in enumerate(words):
+        chunk.append(word)
+        if len(chunk) >= 10 or word["text"].endswith((".", "?", "!")) or i == len(words) - 1:
+            start_str = _format_srt_time(chunk[0]["start_ms"])
+            end_str = _format_srt_time(chunk[-1]["end_ms"])
+            text_str = " ".join(w["text"] for w in chunk)
+            spk = chunk[0].get("speaker")
+            if spk:
+                text_str = f"[{spk}] {text_str}"
+            
+            lines.append(f"{chunk_idx}")
+            lines.append(f"{start_str} --> {end_str}")
+            lines.append(text_str)
+            lines.append("")
+            
+            chunk = []
+            chunk_idx += 1
+            
+    return "\n".join(lines)
+
 @app.get("/api/status/{job_id}", response_model=StatusResponse)
 async def get_status(job_id: str):
     job = _get_job(job_id)
@@ -274,6 +322,7 @@ async def get_result(job_id: str):
         transcript=job["transcript"],
         hook_identification=job["hook_identification"],
         hook_scores=job["hook_scores"],
+        llm_logs=job.get("llm_logs", []),
     )
 
 
@@ -299,6 +348,28 @@ async def download_document(job_id: str):
         output_path,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename=safe_filename,
+    )
+
+
+@app.get("/api/download/srt/{job_id}")
+async def download_srt(job_id: str):
+    job = _get_job(job_id)
+    if job["status"] != "complete":
+        raise HTTPException(status_code=400, detail={
+            "code": "job_not_complete",
+            "message": "Report is not ready yet.",
+            "action": "Wait for the job to complete before downloading.",
+        })
+    
+    audit.info("DOWNLOAD_SRT job=%s", job_id)
+    words = job.get("transcript", {}).get("words", [])
+    srt_content = _generate_srt(words)
+    
+    safe_filename = f"hooklens_{job_id[:8]}.srt"
+    return Response(
+        content=srt_content,
+        media_type="text/plain",
+        headers={"Content-Disposition": f"attachment; filename={safe_filename}"}
     )
 
 

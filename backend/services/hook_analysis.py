@@ -31,7 +31,8 @@ The hook is the portion where the creator grabs the viewer's attention, creates 
 {full_text}
 </transcript>
 
-Return ONLY a valid JSON object — no markdown, no explanation, nothing else:
+Before giving the JSON object, write out your step-by-step reasoning inside <think>...</think> tags. 
+After the closing </think> tag, return ONLY a valid JSON object — no markdown, no explanation, nothing else:
 {{
   "hook_text": "<exact text of the hook segment>",
   "hook_start_char": <integer: character index in full_text where hook begins>,
@@ -66,7 +67,8 @@ Identified hook ({hook_type}):
 {hook_text}
 </hook>
 
-Score this hook and return ONLY a valid JSON object — no markdown, no explanation.
+Score this hook. Before giving the JSON object, write out your step-by-step reasoning inside <think>...</think> tags.
+After the closing </think> tag, return ONLY a valid JSON object — no markdown, no explanation.
 CRITICAL: For "key_teachings", you MUST extract exact, word-for-word substrings from the transcript in their original language. Do NOT translate or paraphrase.
 
 {{
@@ -106,7 +108,7 @@ def _get_client() -> ollama.Client:
     return ollama.Client(host=_OLLAMA_HOST)
 
 
-def _call_ollama(prompt: str, format: str | None = None, on_chunk: Any | None = None) -> str:
+def _call_ollama(prompt: str, format: str | None = None, on_chunk: Any | None = None, on_debug: Any | None = None) -> str:
     client = _get_client()
     try:
         kwargs = {
@@ -126,10 +128,16 @@ def _call_ollama(prompt: str, format: str | None = None, on_chunk: Any | None = 
                 if content_chunk:
                     full_content.append(content_chunk)
                     on_chunk(content_chunk)
-            return "".join(full_content)
+            raw_response = "".join(full_content)
+            if on_debug:
+                on_debug(prompt, raw_response)
+            return raw_response
         else:
             response = client.chat(**kwargs)
-            return response.message.content
+            raw_response = response.message.content
+            if on_debug:
+                on_debug(prompt, raw_response)
+            return raw_response
     except ollama.ResponseError as exc:
         msg = str(exc).lower()
         if "model" in msg and ("not found" in msg or "pull" in msg):
@@ -162,26 +170,36 @@ def _call_ollama(prompt: str, format: str | None = None, on_chunk: Any | None = 
 
 def _extract_json(raw: str) -> dict:
     """Extract JSON from LLM response that may contain surrounding text or markdown."""
-    # Try direct parse first
+    # 1. Try direct parse first
     try:
         return json.loads(raw.strip())
     except json.JSONDecodeError:
         pass
 
-    # Strip markdown code fences
-    cleaned = re.sub(r"```(?:json)?\s*", "", raw).strip().rstrip("`").strip()
+    # 2. Split out the think block if properly closed
+    if "</think>" in raw:
+        cleaned = raw.split("</think>")[-1]
+    else:
+        cleaned = raw
+
+    # 3. Strip markdown code fences
+    cleaned = re.sub(r"```(?:json)?\s*", "", cleaned).strip().rstrip("`").strip()
+    
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError:
         pass
 
-    # Find first { ... } block
-    match = re.search(r"\{[\s\S]+\}", cleaned)
-    if match:
-        try:
-            return json.loads(match.group())
-        except json.JSONDecodeError:
-            pass
+    # 4. Iteratively search for a valid JSON object bounded by { and }
+    end_idx = cleaned.rfind("}")
+    if end_idx != -1:
+        start_idx = cleaned.find("{")
+        while start_idx != -1 and start_idx < end_idx:
+            json_str = cleaned[start_idx:end_idx+1]
+            try:
+                return json.loads(json_str)
+            except json.JSONDecodeError:
+                start_idx = cleaned.find("{", start_idx + 1)
 
     print("--- OLLAMA JSON PARSE FAILURE RAW OUTPUT ---")
     print(raw)
@@ -192,9 +210,9 @@ def _extract_json(raw: str) -> dict:
     )
 
 
-def _identify_hook_sync(full_text: str, on_chunk: Any | None = None) -> dict[str, Any]:
+def _identify_hook_sync(full_text: str, on_chunk: Any | None = None, on_debug: Any | None = None) -> dict[str, Any]:
     prompt = _IDENTIFY_PROMPT.format(full_text=full_text)
-    raw = _call_ollama(prompt, format="json", on_chunk=on_chunk)
+    raw = _call_ollama(prompt, format=None, on_chunk=on_chunk, on_debug=on_debug)
     data = _extract_json(raw)
 
     # Validate and clamp character indices so they never exceed text length
@@ -218,9 +236,9 @@ def _identify_hook_sync(full_text: str, on_chunk: Any | None = None) -> dict[str
     }
 
 
-def _score_hook_sync(full_text: str, hook_text: str, hook_type: str, on_chunk: Any | None = None) -> dict[str, Any]:
+def _score_hook_sync(full_text: str, hook_text: str, hook_type: str, on_chunk: Any | None = None, on_debug: Any | None = None) -> dict[str, Any]:
     prompt = _SCORE_PROMPT.format(full_text=full_text, hook_text=hook_text, hook_type=hook_type)
-    raw = _call_ollama(prompt, format="json", on_chunk=on_chunk)
+    raw = _call_ollama(prompt, format=None, on_chunk=on_chunk, on_debug=on_debug)
     data = _extract_json(raw)
 
     def clamp(val: Any, lo: int = 1, hi: int = 10) -> int:
@@ -248,25 +266,25 @@ def _score_hook_sync(full_text: str, hook_text: str, hook_type: str, on_chunk: A
     }
 
 
-async def identify_hook(transcript_data: dict[str, Any], on_chunk: Any | None = None) -> dict[str, Any]:
+async def identify_hook(transcript_data: dict[str, Any], on_chunk: Any | None = None, on_debug: Any | None = None) -> dict[str, Any]:
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _identify_hook_sync, transcript_data["full_text"], on_chunk)
+    return await loop.run_in_executor(None, _identify_hook_sync, transcript_data["full_text"], on_chunk, on_debug)
 
 
-def _correct_transcript_sync(full_text: str, on_chunk: Any | None = None) -> str:
+def _correct_transcript_sync(full_text: str, on_chunk: Any | None = None, on_debug: Any | None = None) -> str:
     prompt = _CORRECT_TRANSCRIPT_PROMPT.format(full_text=full_text)
-    raw = _call_ollama(prompt, on_chunk=on_chunk)
+    raw = _call_ollama(prompt, on_chunk=on_chunk, on_debug=on_debug)
     # Strip any markdown code fences if the model adds them
     cleaned = re.sub(r"```[^\n]*\n?", "", raw).strip().rstrip("`").strip()
     return cleaned if cleaned else full_text
 
 
-async def correct_transcript(full_text: str, on_chunk: Any | None = None) -> str:
+async def correct_transcript(full_text: str, on_chunk: Any | None = None, on_debug: Any | None = None) -> str:
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _correct_transcript_sync, full_text, on_chunk)
+    return await loop.run_in_executor(None, _correct_transcript_sync, full_text, on_chunk, on_debug)
 
 
-async def score_hook(transcript_data: dict[str, Any], hook_identification: dict[str, Any], on_chunk: Any | None = None) -> dict[str, Any]:
+async def score_hook(transcript_data: dict[str, Any], hook_identification: dict[str, Any], on_chunk: Any | None = None, on_debug: Any | None = None) -> dict[str, Any]:
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
         None,
@@ -275,5 +293,6 @@ async def score_hook(transcript_data: dict[str, Any], hook_identification: dict[
         hook_identification["hook_text"],
         hook_identification["hook_type"],
         on_chunk,
+        on_debug,
     )
 

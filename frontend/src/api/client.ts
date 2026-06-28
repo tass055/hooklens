@@ -98,3 +98,7 @@ export async function getResult(jobId: string): Promise<JobResult> {
 export function getDownloadUrl(jobId: string): string {
   return `${BASE}/api/download/${jobId}`
 }
+
+export function getSrtDownloadUrl(jobId: string): string {
+  return `${BASE}/api/download/srt/${jobId}`
+}
